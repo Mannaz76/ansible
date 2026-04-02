@@ -1,0 +1,59 @@
+- name : add disk and ext4
+  hosts: all
+  become: yes
+  tasks: 
+    - name: add gpt in /dev/sdb
+      parted:
+        device: /dev/sdb
+        number: 1
+        state: present
+        part_type: primary
+        part_start: 0%
+        part_end: 100%
+        label: gpt
+    
+    - name: add gpt in /dev/sdc
+      parted:
+        device: /dev/sdc
+        number: 1
+        state: present
+        part_type: primary
+        part_start: 0%
+        part_end: 100%
+        label: gpt
+
+    - name: create ext4 in sdb
+      filesystem:
+        fstype: ext4
+        dev: /dev/sdb1
+          
+    - name: create ext4 in sdc
+      filesystem:
+        fstype: ext4
+        dev: /dev/sdc1
+
+    - name: create point mount
+      file:
+        path: /mnt/disk1
+        state: directory
+        mode: '0755'
+
+    - name: create point mount
+      file:
+        path: /mnt/disk2
+        state: directory
+        mode: '0755'
+
+    - name: mount
+      mount:
+        path: /mnt/disk1
+        src: /dev/sdb1
+        fstype: ext4
+        state: mounted
+
+    - name: mount
+      mount:
+        path: /mnt/disk2
+        src: /dev/sdc1
+        fstype: ext4
+        state: mounted
