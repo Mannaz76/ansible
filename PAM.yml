@@ -1,0 +1,78 @@
+---
+- name : PAM
+  hosts: all
+  become: yes
+  tasks:
+    - name: Создание новой группы
+      ansible.builtin.group:
+        name: admin
+        state: present
+        system: no
+  
+    - name: Создаем пользователя otusadm
+      ansible.builtin.user:
+        name: otusadm
+        shell: /bin/bash
+        groups: admin
+        append: yes
+        state: present
+        password: "{{ 'password1' | password_hash('sha512') }}"
+
+    - name: Создаем пользователя otususer
+      ansible.builtin.user:
+        name: otususer
+        shell: /bin/bash
+        state: present
+        password: "{{ 'password1' | password_hash('sha512') }}"
+
+    - name: Добавить пользователя root в группу
+      ansible.builtin.user:
+        name: root
+        groups: admin
+        append: yes
+
+    - name: Создать файл login.sh
+      ansible.builtin.copy:
+        dest: /usr/local/bin/login.sh
+        content: |
+          !/bin/bash
+          #Первое условие: если день недели суббота или воскресенье \n
+          if [ $(date +%a) = "Sat" ] || [ $(date +%a) = "Sun" ]; then
+            #Второе условие: входит ли пользователь в группу admin
+            if getent group admin | grep -qw "$PAM_USER"; then
+              #Если пользователь входит в группу admin, то он может подключиться
+              exit 0
+            else
+          #Иначе ошибка (не сможет подключиться)
+            exit 1
+          fi
+          #Если день не выходной, то подключиться может любой пользователь
+          else
+            exit 0
+          fi
+        mode: '0755'
+
+    - name: Добавить модуль pam_exec в файл
+      ansible.builtin.blockinfile:
+        path: /etc/pam.d/sshd
+        block: |
+          #%PAM-1.0
+          auth       substack     password-auth
+          auth       include      postlogin
+          auth required pam_exec.so debug /usr/local/bin/login.sh
+          account    required     dad
+          account    required     pam_nologin.so
+          account    include      password-auth
+          password   include      password-auth
+          # pam_selinux.so close should be the first session rule
+          session    required     pam_selinux.so close
+          session    required     pam_loginuid.so
+          # pam_selinux.so open should only be followed by sessions to be executed in the user context
+          session    required     pam_selinux.so open env_params
+          session    required     pam_namespace.so
+          session    optional     pam_keyinit.so force revoke
+          session    optional     pam_motd.so
+          session    include      password-auth
+          session    include      postlogin
+        insertbefore: BOF
+        create: no
