@@ -1,0 +1,73 @@
+---
+- name : crsyslog
+  hosts: client
+  become: yes
+  tasks:
+    - name: Обновление кэша apt
+      apt:
+        update_cache: yes
+        
+    - name: Установка Nginx
+      apt:
+        name: nginx
+        state: latest
+        
+    - name: Запуск и включение Nginx
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+  
+    - name: Вставить блок
+      ansible.builtin.blockinfile:
+        path: /etc/nginx/nginx.conf
+        insertbefore: BOF
+        block: |
+          error_log /var/log/nginx/error.log;
+          error_log syslog:server=192.168.87.135:514,tag=nginx_error;
+        state: present
+    
+    - name: Вставить строку
+      ansible.builtin.lineinfile:
+        path: /etc/nginx/nginx.conf
+        insertbefore: 'root'
+        line: access_log syslog:server=192.168.87.135:514,tag=nginx_access,severity=info combined;
+        state: present
+
+    - name: Перезапустить службу nginx
+      service:
+        name: nginx
+        state: restarted
+
+- name : srsyslog
+  hosts: server
+  become: yes
+  tasks:
+    - name: Вставить блок после строки, содержащей "module"
+      ansible.builtin.blockinfile:
+        path: /etc/rsyslog.conf
+        insertafter: 'MODULES'
+        marker: "# {mark} ANSIBLE MODULE BLOCK"
+        block: |
+          module(load="imudp")
+          input(type="imudp" port="514")
+          module(load="imtcp")
+          input(type="imtcp" port="514")
+        state: present
+
+    - name: Добавить блок строк в конец файла
+      #when: false
+      ansible.builtin.blockinfile:
+        path: /etc/rsyslog.conf
+        insertafter: EOF
+        marker: "# {mark} ANSIBLE END BLOCK"
+        block: |
+          $template RemoteLogs,"/var/log/rsyslog/%HOSTNAME%/%PROGRAMNAME%.log"
+          *.* ?RemoteLogs
+          & ~
+        state: present
+          
+    - name: Перезапустить службу rsyslog
+      service:
+        name: rsyslog
+        state: restarted
