@@ -1,0 +1,186 @@
+---
+- name : PAM
+  hosts: server
+  become: yes
+  tasks:
+    - name: update
+      apt:
+        update_cache=yes
+      tags:
+        - update apt
+    - name: dnsmasq install
+      apt:
+        name: dnsmasq
+        state: latest
+    
+    - name: Создать файл pxe.conf
+      ansible.builtin.copy:
+        dest: /etc/dnsmasq.d/pxe.conf
+        content: |
+          #Указываем интерфейс в на котором будет работать DHCP/TFTP
+          interface=ens37
+          bind-interfaces
+          #Также указаваем интерфейс и range адресов которые будут выдаваться по DHCP
+          dhcp-range=eth1,10.0.0.100,10.0.0.120
+          #Имя файла, с которого надо начинать загрузку для Legacy boot (этот пример рассматривается в методичке)
+          dhcp-boot=pxelinux.0
+          #Имена файлов, для UEFI-загрузки (не обязательно добавлять)
+          dhcp-match=set:efi-x86_64,option:client-arch,7
+          dhcp-boot=tag:efi-x86_64,bootx64.efi
+          #Включаем TFTP-сервер
+          enable-tftp
+          #Указываем каталог для TFTP-сервера
+          tftp-root=/srv/tftp/amd64
+        mode: '0755'
+
+    - name: Создать директорию /srv/tftp
+      ansible.builtin.file:
+        path: /srv/tftp
+        state: directory
+        mode: '0755'
+
+    - name: download files ubuntu 24.04
+      when: false
+      ansible.builtin.command:
+        cmd: 'wget http://cdimage.ubuntu.com/ubuntu-server/daily-live/current/resolute-netboot-amd64.tar.gz'
+    
+    - name: tar files ubuntu
+      ansible.builtin.command:
+        cmd: 'tar -xzvf resolute-netboot-amd64.tar.gz -C /srv/tftp'
+
+    - name: restart dnsmasq
+      systemd:
+        name: dnsmasq
+        state: restarted
+
+    - name: apache2 install
+      apt:
+        name: apache2
+        state: latest
+
+    - name: Создать директорию /srv/images
+      ansible.builtin.file:
+        path: /srv/images
+        state: directory
+        mode: '0755'
+
+    - name: download files ubuntu iso
+      when: false
+      ansible.builtin.command:
+        cmd: 'wget -P /srv/images http://cdimage.ubuntu.com/ubuntu-server/daily-live/current/resolute-live-server-amd64.iso'
+
+
+    - name: Создать файл ks-server.conf
+      ansible.builtin.copy:
+        dest: /etc/apache2/sites-available/ks-server.conf
+        content: |
+          #Указываем IP-адрес хоста и порт на котором будет работать Web-сервер
+          <VirtualHost 10.0.0.20:80>
+          DocumentRoot /
+          # Указываем директорию /srv/images из которой будет загружаться iso-образ
+          <Directory /srv/images>
+          Options Indexes MultiViews
+          AllowOverride All
+          Require all granted
+          </Directory>
+          </VirtualHost>
+          <Directory /srv/ks>
+          Options Indexes MultiViews
+          AllowOverride All
+          Require all granted
+          </Directory>
+
+
+    - name: download files ubuntu iso
+      #when: false
+      ansible.builtin.command:
+        cmd: 'a2ensite ks-server.conf'
+
+
+    - name: Заменить самую последнюю строку конфига
+      ansible.builtin.lineinfile:
+        path: /srv/tftp/amd64/pxelinux.cfg/default
+        regexp: '^.*$' # Ищет любую строку от начала до конца
+        line: 'APPEND root=/dev/ram0 ramdisk_size=3000000 ip=dhcp iso-url=http://10.0.0.20/srv/images/resolute-live-server-amd64.iso autoinstall dc=nocloud-net;s=http://10.0.0.20/srv/ks/'
+        insertafter: EOF # Гарантирует работу с концом файла
+      notify: restart apache2
+
+    - name: Создать директорию /srv/ks
+      ansible.builtin.file:
+        path: /srv/ks
+        state: directory
+        mode: '0755'
+
+    - name: Создать файл user-data
+      ansible.builtin.copy:
+        dest: /srv/ks/user-data
+        content: |
+          #cloud-config
+          autoinstall:
+          apt:
+          disable_components: []
+          geoip: true
+          preserve_sources_list: false
+          primary:
+          - arches:
+          - amd64
+          - i386
+          uri: http://us.archive.ubuntu.com/ubuntu
+          - arches:
+          - default
+          uri: http://ports.ubuntu.com/ubuntu-ports
+          drivers:
+          install: false
+          identity:
+          hostname: linux
+          password: $6$sJgo6Hg5zXBwkkI8$btrEoWAb5FxKhajagWR49XM4EAOfO/
+          Dr5bMrLOkGe3KkMYdsh7T3MU5mYwY2TIMJpVKckAwnZFs2ltUJ1abOZ.
+          realname: otus
+          username: otus
+          kernel:
+          package: linux-generic
+          keyboard:
+          layout: us
+          toggle: null
+          variant: ''
+          locale: en_US.UTF-8
+          network:
+          ethernets:
+          enp0s3:
+          dhcp4: true
+          enp0s8:
+          dhcp4: true
+          version: 2
+          ssh:
+          allow-pw: true
+          authorized-keys: []
+          install-server: true
+          updates: security
+          version: 1
+
+
+    - name: Создаем файл meta-data
+      ansible.builtin.file:
+        path: /srv/ks/meta-data
+        state: touch
+        mode: '0644'
+
+    - name: restart dnsmasq
+      systemd:
+        name: dnsmasq
+        state: restarted
+        enabled: yes
+
+
+  handlers:
+    - name: restart apache2
+      systemd:
+        name: apache2
+        state: restarted
+        enabled: yes
+    
+
+    - name: Reload Apache
+      service:
+        name: apache2
+        state: reloaded
