@@ -40,7 +40,7 @@
         mode: '0755'
 
     - name: download files ubuntu 24.04
-      when: false
+      #when: false
       ansible.builtin.command:
         cmd: 'wget http://cdimage.ubuntu.com/ubuntu-server/daily-live/current/resolute-netboot-amd64.tar.gz'
     
@@ -65,7 +65,7 @@
         mode: '0755'
 
     - name: download files ubuntu iso
-      when: false
+      #when: false
       ansible.builtin.command:
         cmd: 'wget -P /srv/images http://cdimage.ubuntu.com/ubuntu-server/daily-live/current/resolute-live-server-amd64.iso'
 
