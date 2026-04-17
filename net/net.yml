@@ -1,0 +1,37 @@
+---
+- name: net
+  hosts: all
+  become: yes
+  tasks:
+    - name: Копирование файла конфигурации
+      template:
+        src: ./netplan-{{ansible_hostname}}.yaml
+        dest: /etc/netplan/01-netcfg.yaml
+        owner: root
+        group: root
+        mode: '0600'
+      notify: apply_netplan
+
+    - name: Set up NAT on inetRouter
+      template: 
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      with_items:
+        - { src: "iptables_rules.ipv4", dest: "/etc/iptables_rules.ipv4", mode: "0644" }
+        - { src: "iptables_restore", dest: "/etc/network/if-pre-up.d/iptables", mode: "0755" }
+      when: (ansible_hostname == "inetRouter")
+
+    - name: set up forward packages across routers
+      sysctl:
+        name: net.ipv4.conf.all.forwarding
+        value: '1'
+        state: present
+      when: "'routers' in group_names"
+
+   
+  handlers:
+    - name: apply_netplan
+      command: netplan apply

@@ -1,0 +1,29 @@
+network:
+  version: 2
+  ethernets:
+    ens18:
+      addresses:
+      - "192.168.11.33/24"
+    ens19:
+      addresses:
+      - "192.168.255.10/30"
+      nameservers:
+        addresses:
+        - 8.8.8.8
+        search: []
+      routes:
+      - to: "default"
+        via: "192.168.255.9"
+    ens20:
+      addresses:
+      - "192.168.2.129/26"
+    ens21:
+      addresses:
+      - "192.168.2.1/26"
+    ens22:
+      addresses:
+      - "192.168.2.65/26"
+    ens23:
+      addresses:
+      - "192.168.2.192/26"
+
