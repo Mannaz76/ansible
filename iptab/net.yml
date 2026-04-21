@@ -1,0 +1,131 @@
+---
+- name: net
+  hosts: all
+  become: yes
+  tasks:
+    - name: Копирование файла конфигурации
+      template:
+        src: ./netplan-{{ansible_hostname}}.yaml
+        dest: /etc/netplan/01-netcfg.yaml
+        owner: root
+        group: root
+        mode: '0600'
+      notify: apply_netplan
+      when: "'routers' in group_names"
+
+    - name: Set up NAT on inet2Router
+      template: 
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      with_items:
+        - { src: "iptables_rules.ipv4", dest: "/etc/iptables_rules.ipv4", mode: "0644" }
+        - { src: "iptables_restore", dest: "/etc/network/if-pre-up.d/iptables", mode: "0755" }
+      when: (ansible_hostname == "inet2Router")
+
+    - name: set up forward packages across routers
+      sysctl:
+        name: net.ipv4.conf.all.forwarding
+        value: '1'
+        state: present
+      when: "'routers' in group_names"
+
+    - name: update
+      apt:
+        update_cache=yes
+      tags:
+        - update apt
+
+    - name: NGINX install
+      apt:
+        name: nginx
+        state: latest
+      notify:
+        - restart nginx
+      tags:
+        - nginx-package
+      when: (ansible_hostname == "centralServer")
+
+    - name: knockd install
+      apt:
+        name: knockd
+        state: latest
+      when: (ansible_hostname == "centralRouter")
+
+    - name: knockd install
+      apt:
+        name: knockd
+        state: latest
+      when: (ansible_hostname == "inetRouter")
+
+    - name: Создать файл knockd
+      ansible.builtin.copy:
+        dest: /etc/default/knockd
+        content: | 
+          START_KNOCKD=1
+        mode: '0755'
+      when: (ansible_hostname == "inetRouter")
+
+    - name: Создать файл knockd.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/knockd.service
+        content: | 
+          [Unit]
+          Description=Port-Knock Daemon
+          After=network.target
+          Requires=network.target
+          Documentation=man:knockd(1)
+
+          [Service]
+          EnvironmentFile=-/etc/default/knockd
+          ExecStartPre=/usr/bin/sleep 1
+          ExecStart=/usr/sbin/knockd $KNOCKD_OPTS
+          ExecReload=/bin/kill -HUP $MAINPID
+          KillMode=mixed
+          Restart=always
+          SuccessExitStatus=0 2 15
+          ProtectSystem=full
+          CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: '0755'
+      notify: reload knockd
+      when: (ansible_hostname == "inetRouter")
+
+    - name: Создать файл knockd.conf
+      ansible.builtin.copy:
+        dest: /etc/knockd.conf
+        content: | 
+          [options]
+               UseSyslog
+               Interface = ens19
+          [SSH]
+               sequence = 7000,9000,8000
+               seq_timeout = 5
+               tcpflags = syn
+               start_command = /sbin/iptables -I INPUT -s %IP% -p tcp --dport 22 -j ACCEPT
+               stop_command = /sbin/iptables -D INPUT -s %IP% -p tcp --dport 22 -j ACCEPT
+               cmd_timeout = 60
+        mode: '0755'
+      notify: Start knockd
+      when: (ansible_hostname == "inetRouter")
+
+  handlers:
+    - name: apply_netplan
+      command: netplan apply
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+        enabled: yes
+    - name: reload knockd
+      ansible.builtin.service:
+        name: knockd
+        state: reloaded
+    - name: Start knockd
+      ansible.builtin.service:
+        name: knockd
+        state: started
