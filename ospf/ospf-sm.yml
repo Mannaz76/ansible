@@ -1,0 +1,26 @@
+---
+- name: net
+  hosts: routers
+  become: yes
+  tasks:
+    - name: set up OSPF
+      template:
+        src: .//{{ ansible_hostname }}-frr-sm.conf
+        dest: /etc/frr/frr.conf
+        owner: frr
+        group: frr
+        mode: 0640
+      notify: restart frr
+      when: (ansible_hostname == "ospf2")
+
+
+  handlers:
+    - name: apply_netplan
+      command: netplan apply
+
+    - name: restart frr
+      service:
+        name: frr
+        state: restarted
+        enabled: true
+

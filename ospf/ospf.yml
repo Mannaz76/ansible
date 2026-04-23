@@ -1,0 +1,77 @@
+---
+- name: net
+  hosts: routers
+  become: yes
+  tasks:
+    - name: Копирование файла конфигурации
+      template:
+        src: ./netplan-{{ansible_hostname}}.yaml
+        dest: /etc/netplan/01-netcfg.yaml
+        owner: root
+        group: root
+        mode: '0600'
+      notify: apply_netplan
+
+    - name: Add GPG key from url
+      ansible.builtin.apt_key:
+        url: https://deb.frrouting.org/frr/keys.asc
+        state: present
+
+    - name: Add FRR official repository
+      ansible.builtin.apt_repository:
+        repo: "deb https://deb.frrouting.org/frr {{ ansible_distribution_release }} frr-stable"
+        state: present
+        filename: frr
+
+    - name: update
+      apt:
+        update_cache=yes
+      tags:
+        - update apt
+
+    - name: install
+      apt:
+        name: 
+          - traceroute
+          - tcpdump
+          - net-tools
+          - frr
+          - frr-pythontools
+        state: present
+        update_cache: true
+
+    - name: Enable IP Forwarding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: Установить Option в yes
+      lineinfile:
+        path: /etc/frr/daemons
+        regexp: '^ospfd=no'
+        line: 'ospfd=yes'
+        state: present
+        backrefs: no
+
+    - name: set up OSPF
+      template:
+        src: ./{{ ansible_hostname }}-frr.conf
+        dest: /etc/frr/frr.conf
+        owner: frr
+        group: frr
+        mode: 0640
+      notify: restart frr
+
+
+  handlers:
+    - name: apply_netplan
+      command: netplan apply
+
+    - name: restart frr
+      service:
+        name: frr
+        state: restarted
+        enabled: true
+
