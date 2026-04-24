@@ -1,0 +1,71 @@
+---
+- name: vpn
+  hosts: all
+  become: yes
+  tasks:
+    - name: update
+      apt:
+        update_cache=yes
+      tags:
+        - update apt
+
+    - name: install
+      apt:
+        name: 
+          - openvpn
+          - iperf3
+          - selinux-utils
+        state: present
+        update_cache: true
+
+          #- name: Set SELinux to permissive mode
+          #ansible.posix.selinux:
+          #state: permissive
+          #policy: targeted
+
+    - name: Generate OpenVPN secret key using openssl
+      ansible.builtin.shell: "openvpn --genkey secret /etc/openvpn/static.key"
+
+    - name: Enable IP Forwarding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: copy config
+      template:
+        src: ./{{ ansible_hostname }}.conf
+        dest: /etc/openvpn/server.conf
+        owner: root
+        group: root
+        mode: 0640
+
+    - name: create cervice
+      template:
+        src: ./service
+        dest: /etc/systemd/system/openvpn@.service
+        owner: root
+        group: root
+        mode: 0640
+
+    - name: Reload systemd configuration
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      notify: start service
+
+    - name: copy key
+      ansible.builtin.copy:
+        src: /etc/openvpn/static.key
+        dest: /etc/openvpn/static.key
+        owner: root
+        group: root
+        mode: '0644'
+      when: (ansible_hostname == "client")
+
+  handlers:
+    - name: start service
+      ansible.builtin.service:
+        name: openvpn@
+        state: started
+        enabled: yes

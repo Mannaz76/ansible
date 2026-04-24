@@ -1,0 +1,155 @@
+---
+- name: vpn
+  hosts: all
+  become: yes
+  tasks:
+    - name: update
+      apt:
+        update_cache=yes
+      tags:
+        - update apt
+
+    - name: install
+      apt:
+        name: 
+          - openvpn
+          - easy-rsa
+        state: present
+        update_cache: true
+
+    - name: Enable IP Forwarding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+      when: (ansible_hostname == "server")
+
+    - name: Инициализация Easy-RSA PKI
+      command: "/usr/share/easy-rsa/easyrsa init-pki"
+      args:
+        chdir: /etc/openvpn/
+        creates: /etc/openvpn/pki
+      when: (ansible_hostname == "server")
+
+    - name: build-ca
+      command: "/usr/share/easy-rsa/easyrsa --batch build-ca nopass"
+      args:
+        chdir: /etc/openvpn/
+        creates: /etc/openvpn/pki/ca.crt
+      when: (ansible_hostname == "server")
+
+    - name: gen-req server
+      command: "/usr/share/easy-rsa/easyrsa gen-req server nopass"
+      args:
+        chdir: /etc/openvpn/
+        creates: "/etc/openvpn/pki/reqs/server.req"
+      environment:
+        EASYRSA_BATCH: "rasvpn"
+      when: (ansible_hostname == "server")
+
+    - name: sign-req server
+      command: "/usr/share/easy-rsa/easyrsa sign-req server server"
+      args:
+        chdir: /etc/openvpn/
+        creates: "/etc/openvpn/pki/issued/server.crt"
+      environment:
+        EASYRSA_BATCH: "yes"
+      when: (ansible_hostname == "server")
+
+    - name: gen-dh
+      command: "/usr/share/easy-rsa/easyrsa gen-dh"
+      args:
+        chdir: /etc/openvpn/
+        creates: "/etc/openvpn/pki/dh.pem"
+      when: (ansible_hostname == "server")
+
+    - name: henkey
+      command: "openvpn --genkey secret ca.key"
+      args:
+        chdir: /etc/openvpn/
+        creates: "/etc/openvpn/ca.key"
+      when: (ansible_hostname == "server")
+
+
+    - name: gen-req client
+      command: "/usr/share/easy-rsa/easyrsa gen-req client nopass"
+      args:
+        chdir: /etc/openvpn/
+        creates: "/etc/openvpn/pki/reqs/client.req"
+      environment:
+        EASYRSA_BATCH: "client"
+      when: (ansible_hostname == "server")
+
+    - name: sign-req client
+      command: "/usr/share/easy-rsa/easyrsa sign-req client client"
+      args:
+        chdir: /etc/openvpn/
+        creates: "/etc/openvpn/pki/issued/client.crt"
+      environment:
+        EASYRSA_BATCH: "yes"
+      when: (ansible_hostname == "server")
+
+
+    - name: create server.conf
+      template:
+        src: ./server-ras.conf
+        dest: /etc/openvpn/server.conf
+        owner: root
+        group: root
+        mode: 0640
+      when: (ansible_hostname == "server")
+      notify: start service
+
+    - name: create client router
+      template:
+        src: ./ras-client
+        dest: /etc/openvpn/client/client
+        owner: root
+        group: root
+        mode: 0640
+      when: (ansible_hostname == "server")
+
+    - name: copy ca
+      ansible.builtin.copy:
+        src: /etc/openvpn/pki/ca.crt
+        dest: /etc/openvpn/ca.crt
+        owner: root
+        group: root
+        mode: '0644'
+      when: (ansible_hostname == "client")
+
+    - name: copy crt
+      ansible.builtin.copy:
+        src: /etc/openvpn/pki/issued/client.crt
+        dest: /etc/openvpn/client.crt
+        owner: root
+        group: root
+        mode: '0644'
+      when: (ansible_hostname == "client")
+
+    - name: copy key
+      ansible.builtin.copy:
+        src: /etc/openvpn/pki/private/client.key
+        dest: /etc/openvpn/client.key
+        owner: root
+        group: root
+        mode: '0644'
+      when: (ansible_hostname == "client")
+
+    - name: create client
+      template:
+        src: ./client-ras.conf
+        dest: /etc/openvpn/client.conf
+        owner: root
+        group: root
+        mode: 0640
+      when: (ansible_hostname == "client")
+      notify: start service
+
+  handlers:
+    - name: start service
+      ansible.builtin.service:
+        name: openvpn@
+        state: started
+        enabled: yes
